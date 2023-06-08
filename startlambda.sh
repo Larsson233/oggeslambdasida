@@ -1,0 +1,1 @@
+aws cloudformation create-stack --stack-name myLambda --template-body file://lambdastack.yml --capabilities CAPABILITY_NAMED_IAM

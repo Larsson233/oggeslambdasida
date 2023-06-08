@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Contact Form</title>
+</head>
+<body>
+    <h1>Contact Form</h1>
+    <form id="contactForm" method="POST">
+        <label for="name">Name:</label>
+        <input type="text" id="name" name="name" required><br><br>
+
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" required><br><br>
+
+        <label for="msg">Message:</label><br>
+        <textarea id="msg" name="msg" rows="4" cols="50" required></textarea><br><br>
+
+        <input type="submit" value="Submit">
+    </form>
+
+    <script>
+        ApiUrl = "https://aa2b6mdz89.execute-api.eu-west-1.amazonaws.com/Prod/myresource";
+
+        // Add event listener to form. Intercept form submission
+        document.getElementById("contactForm").addEventListener("submit", function(event) {
+            event.preventDefault(); // Prevent form submission
+
+            // Retrieve form data
+            var formData = {
+                name: document.getElementById("name").value,
+                email: document.getElementById("email").value,
+                msg: document.getElementById("msg").value
+            };
+
+            // Convert JavaScript object to JSON string
+            var payload = JSON.stringify(formData);
+
+            // Send payload to the API (asynchronously)
+            fetch(ApiUrl, {
+                method: "POST",
+                body: payload
+            })
+            .then(response => {
+                if (response.ok) {
+                    alert("Form submitted successfully");
+                } else {
+                    alert("Form submission failed");
+                }
+            })
+            .catch(error => {
+                console.error("An error occurred:", error);
+            });
+        });
+    </script>
+</body>
+</html>

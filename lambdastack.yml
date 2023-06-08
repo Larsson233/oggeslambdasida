@@ -1,0 +1,238 @@
+---
+AWSTemplateFormatVersion : "2010-09-09"
+
+Description: >
+  My
+  first
+  template.
+
+Resources:
+
+  MyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MyLambdaRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+      Policies:
+        - PolicyName: MyLambdaPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: "*"
+
+  MyLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: MyLambdaFunction
+      Description: A Lambda function that returns a static string.
+      Handler: index.handler
+      Role: !GetAtt MyLambdaRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json                     # used for converting json strings to Python objects
+          import boto3                    # handles AWS
+          from datetime import datetime   # used for creating the timestamp
+
+          def handler(event, context):
+              # Connect to the DynamoDB table
+              db = boto3.resource('dynamodb')
+              table = db.Table('MyDynamoDBTable')
+
+              # Create the time stamp
+              dateTime = (datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+              
+              try:
+                  # Get the contact info from the request
+                  payload = json.loads(event['body'])
+              
+                  # Add a row with contact info to DynamoDB
+                  table.put_item(
+                    Item={
+                    'timestamp': dateTime,
+                    'name': payload['name'],
+                    'email': payload['email'],
+                    'message': payload['msg']
+                    }
+                  )
+                  
+                  # Return success
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps('Successfully saved contact info!'),
+                      'headers': {
+                          "Access-Control-Allow-Origin": "*",
+                          "Access-Control-Allow-Credentials": True,
+                      }
+                  }
+                  
+              except:
+                  # Return error
+                  return {
+                          'statusCode': 400,
+                          'body': json.dumps('Error saving contact info'),
+                          'headers': {
+                              "Access-Control-Allow-Origin": "*",
+                              "Access-Control-Allow-Credentials": True,
+                          }
+                  }
+      Runtime: python3.10
+  
+  MyDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MyDynamoDBTable
+      AttributeDefinitions:
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: timestamp
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+  MyApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: MyAPIGateway
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+  
+  MyApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref MyApiGateway
+      ParentId: !GetAtt MyApiGateway.RootResourceId
+      PathPart: myresource  
+
+  MyApiGatewayMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref MyApiGateway
+      ResourceId: !Ref MyApiGatewayResource
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: ANY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MyLambdaFunction.Arn}/invocations'
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+
+  MyApiGatewayOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref MyApiGateway
+      ResourceId: !Ref MyApiGatewayResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+
+  MyLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref MyLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MyApiGateway}/*/ANY/myresource"
+
+  MyApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - MyApiGatewayMethod
+    Properties:
+      RestApiId: !Ref MyApiGateway
+  
+  MyApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref MyApiGateway
+      DeploymentId: !Ref MyApiGatewayDeployment 
+      StageName: Prod
+  
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: mybucket-20230608-1413-1998
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods:
+              - GET
+              - HEAD
+            AllowedOrigins:
+              - "*"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  MyBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MyS3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${MyS3Bucket}/*"
+
+Outputs:
+  APIGatewayEndpoint:
+    Value:
+      Fn::Sub: "https://${MyApiGateway}.execute-api.${AWS::Region}.amazonaws.com/"
+  WebsiteURL:
+    Value: !GetAtt MyS3Bucket.WebsiteURL
+
